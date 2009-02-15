@@ -297,7 +297,6 @@ def _dispatch():
                                 choice = possible_choice
                             else:
                                 print("In the correct range, please")
-                        print "Your choice", projects[choice]
                         install_addon(projects[choice][1], options.force, options.clean)
                     pass
                 else:
