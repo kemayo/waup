@@ -7,6 +7,7 @@ import sys
 import cPickle
 import re
 import os
+import string
 from StringIO import StringIO
 from optparse import OptionParser
 
@@ -21,14 +22,17 @@ __license__ = 'New BSD License'
 So, wowace.com projects have an RSS feed. OKAY!
 
 This script may be run like so:
-    ./waup.py install <projectname>, <projectname>, ...
-    ./waup.py update [<projectname>, <projectname>, ...]
+    # to install or update:
+    ./waup.py <projectname>, <projectname>, ...
+    # to remove:
+    ./waup.py -r [<projectname>, <projectname>, ...]
 
 It doesn't do anything fancy. It just downloads the files and installs them.
 """
 
 USER_AGENT = 'waup/%s' % __version__
 PROJECT_URL = 'http://www.wowace.com/projects/%s/files.rss'
+SEARCH_URL = 'http://www.wowace.com/projects/?search=%s'
 
 WOW_DIRECTORY = '/home/david/.wine/drive_c/Program Files/World of Warcraft/Interface/AddOns'
 
@@ -36,6 +40,50 @@ CACHE = False
 
 class UnknownProjectException(Exception):
     pass
+class BadSearchException(Exception):
+    pass
+
+def guess_project_name(text):
+    """Know the addon name and not the project name?
+    
+    Returns a list of tuples, in the form (addon name, project name)
+    """
+    # First, if this is already cached, return the cache-match:
+    if text in CACHE['name_project_map']:
+        return [(text, CACHE['name_project_map'][text]),]
+    
+    # Otherwise hit wowace.com:
+    try:
+        html = _fetch(SEARCH_URL % text)
+    except urllib2.HTTPError:
+        raise BadSearchException, "HTTP error loading search results for '%s'." % text
+    
+    soup = BeautifulSoup(html)
+    
+    # There are two possibilities here! If the provided text was an exact match to a project
+    # we'll have been redirected to that page. Otherwise, we're on a search page.
+
+    selected = soup.find('ul', id='nav-main').find('span', 'selected')
+    title = unicode(selected.find('span', 'ellipsis').find('span').string)
+    if title != 'WowAce.com':
+        # this is the project page.
+        match = re.search(r'^/projects/([^/]+)/', selected.find('a')['href'])
+        if match:
+            CACHE['name_project_map'][title] = match.group(1)
+            return [(title, match.group(1))]
+        raise BadSearchException, "Redirected from the results page, but couldn't find the project name. (%s)" % text
+
+    listing = soup.findAll('table', 'listing')[1].find('tbody') # table.listing
+    
+    possibilities = []
+    for td in listing.findAll('td', 'first'):
+        a = td.find('a')
+        match = re.search(r'^/projects/([^/]+)/', a['href'])
+        if match:
+            CACHE['name_project_map'][unicode(a.string)] = match.group(1)
+            possibilities.append((unicode(a.string), match.group(1)))
+
+    return possibilities
 
 def load_project(project_name):
     try:
@@ -43,9 +91,16 @@ def load_project(project_name):
     except urllib2.HTTPError:
         raise UnknownProjectException, "Project %s not found." % project_name
     soup = BeautifulStoneSoup(rss)
+
+    name = False
+    match = re.search(r'^Latest (.*) Files$', soup.find('title').string)
+    if match:
+        name = match.group(1)
+
     latest = soup.find('item')
     return {
         'project': project_name,
+        'name': name,
         'file_url': get_file_url_from_filepage(latest.find('link').string),
         'guid': str(latest.find('guid').string), # str() because .string is actually a NavigableString, which is *huge*
     }
@@ -94,6 +149,7 @@ def uninstall_addon(name):
 def blank_cache():
     return {
         'addons': {},
+        'name_project_map': {}
     }
 
 def load_cache():
@@ -115,6 +171,11 @@ def load_cache():
     return cache
 
 def save_cache(cache):
+    # rebuild this map on-save:
+    for project, info in cache['addons'].items():
+        if info.get('name'):
+            cache['name_project_map'][info.get('name')] = project
+    # and save:
     pickled_versions = open(os.path.join(WOW_DIRECTORY, 'waup_cache.pkl'), 'wb')
     cPickle.dump(cache, pickled_versions)
     pickled_versions.close()
@@ -186,7 +247,6 @@ def _removedir(path):
     _rmgeneric(path, os.rmdir)
 
 def _dispatch():
-    # get_deps = True, unpackage = False, delete_old = True, force = False
     parser = OptionParser(version="%%prog %s" % __version__, usage = "usage: %prog [options] ([addon1] ... [addon99])")
     parser.add_option('-c', '--clean', action='store_true', dest='clean', default=False,
         help="Delete addon directories before replacing them")
@@ -194,17 +254,59 @@ def _dispatch():
         help="Redownload all addons, even if current")
     parser.add_option('-r', '--remove', action='store_true', dest='remove', default=False,
         help="Remove addons passed as arguments")
+    parser.add_option('-n', '--name', action='store_true', dest='by_name', default=False,
+        help="Search for addons by addon name instead of project name")
+    parser.add_option('--flush', action='store_true', dest='flush', default=False,
+        help="Flush the cached mapping of addon names to project names")
     options, args = parser.parse_args(sys.argv[1:])
     
     if args:
-        if options.remove:
+        if options.flush:
+            for name in args:
+                if name in CACHE['name_project_map']:
+                    print("Removing %s:%s from cache." % CACHE['name_project_map'][name])
+                    del(CACHE['name_project_map'][name])
+                else:
+                    print("%s isn't in the cache." % name)
+        elif options.remove:
+            if options.by_name:
+                projects = []
+                for name in args:
+                    if name in CACHE['name_project_map']:
+                        projects.append(CACHE['name_project_map'][name])
+                    else:
+                        print("Couldn't find %s." % name)
+                args = projects
             for project in args:
                 uninstall_addon(project)
         else:
             for project in args:
-                install_addon(project, options.force, options.clean)
+                if options.by_name:
+                    for name in args:
+                        projects = guess_project_name(name)
+                        for i in xrange(len(projects)):
+                            print("[%d] %s : %s" % (i, projects[i][0], projects[i][1]))
+                        choice = False
+                        while choice is False:
+                            possible_choice = raw_input("--> ")
+                            if not possible_choice.isdigit():
+                                print("A number, please.")
+                                continue
+                            possible_choice = string.atoi(possible_choice)
+                            if 0 <= possible_choice < len(projects):
+                                choice = possible_choice
+                            else:
+                                print("In the correct range, please")
+                        print "Your choice", projects[choice]
+                        install_addon(projects[choice][1], options.force, options.clean)
+                    pass
+                else:
+                    install_addon(project, options.force, options.clean)
     else:
-        if options.remove:
+        if options.flush:
+            print("Removing %d entries from cache." % len(CACHE['name_project_map']))
+            CACHE['name_project_map'] = {}
+        elif options.remove:
             print("No project names provided.")
             return
         for project in CACHE['addons']:
