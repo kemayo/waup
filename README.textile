@@ -1,0 +1,30 @@
+waup version 0.1
+
+waup is a *really*, *really* simple addon updater. Tell it the name of a project hosted on wowace.com and it'll fetch the latest version when asked to.
+
+<h2>Example</h2>
+
+<pre>
+$ ./waup.py mapster mendeleev chatter
+bank-stack now installed at http://www.wowace.com/projects/bank-stack/files/64-r116/
+better-quest now installed at http://www.wowace.com/projects/better-quest/files/92-r123/
+
+$ ./waup.py
+Skipping bank-stack; latest version already installed.
+Skipping better-quest; latest version already installed.
+Skipping chatter; latest version already installed.
+
+$ ./waup.py -r chatter
+chatter uninstalled
+</pre>
+
+<h2>Installation</h2>
+
+* Run this:
+
+<pre>
+git clone git://github.com/kemayo/waup.git waup
+</pre>
+
+* Edit waup/waup.py so WOW_DIRECTORY points to your own WoW directory.
+
