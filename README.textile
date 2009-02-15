@@ -5,7 +5,7 @@ waup is a *really*, *really* simple addon updater. Tell it the name of a project
 <h2>Example</h2>
 
 <pre>
-$ ./waup.py mapster mendeleev chatter
+$ ./waup.py bank-stack better-quest
 bank-stack now installed at http://www.wowace.com/projects/bank-stack/files/64-r116/
 better-quest now installed at http://www.wowace.com/projects/better-quest/files/92-r123/
 
