@@ -43,16 +43,33 @@ class UnknownProjectException(Exception):
 class BadSearchException(Exception):
     pass
 
+def search(name, strict=False, local_only=False):
+    possible = []
+    # If we're doing a strict match and it's already cached, return that right away.
+    if strict:
+        if name in CACHE['name_project_map']:
+            possible.append((name, CACHE['name_project_map'][name]))
+        if not local_only:
+            remote = guess_project_name(name)
+            possible.extend([proj for proj in remote if proj[0] == name])
+        return _unique(possible)
+    
+    # Otherwise, start to build things up...
+    search_re = re.compile(name, re.I)
+    for addon,project in CACHE['name_project_map'].items():
+        if search_re.search(addon):
+            possible.append((addon, project))
+
+    if not local_only:
+        possible.extend(guess_project_name(name))
+
+    return _unique(possible)
+
 def guess_project_name(text):
     """Know the addon name and not the project name?
     
     Returns a list of tuples, in the form (addon name, project name)
     """
-    # First, if this is already cached, return the cache-match:
-    if text in CACHE['name_project_map']:
-        return [(text, CACHE['name_project_map'][text]),]
-    
-    # Otherwise hit wowace.com:
     try:
         html = _fetch(SEARCH_URL % text)
     except urllib2.HTTPError:
@@ -246,6 +263,18 @@ def _removedir(path):
             _removedir(fullpath)
     _rmgeneric(path, os.rmdir)
 
+def _unique(seq, id_function = lambda x: x):
+    """Take any sequence and return a list of unique values from it, maintaining their original order"""
+    seen = {}
+    result = []
+    for item in seq:
+        id = id_function(item)
+        if id in seen:
+            continue
+        seen[id] = True
+        result.append(item)
+    return result
+
 def _dispatch():
     parser = OptionParser(version="%%prog %s" % __version__, usage = "usage: %prog [options] ([addon1] ... [addon99])")
     parser.add_option('-c', '--clean', action='store_true', dest='clean', default=False,
@@ -254,6 +283,8 @@ def _dispatch():
         help="Redownload all addons, even if current")
     parser.add_option('-r', '--remove', action='store_true', dest='remove', default=False,
         help="Remove addons passed as arguments")
+    parser.add_option('-s', '--search', action='store_true', dest='search', default=False,
+        help="Just print a list of addons whose names are similar to the arguments (implies --name)")
     parser.add_option('-n', '--name', action='store_true', dest='by_name', default=False,
         help="Search for addons by addon name instead of project name")
     parser.add_option('--flush', action='store_true', dest='flush', default=False,
@@ -268,6 +299,12 @@ def _dispatch():
                     del(CACHE['name_project_map'][name])
                 else:
                     print("%s isn't in the cache." % name)
+        elif options.search:
+            for name in args:
+                projects = search(name, strict=False, local_only=False)
+                print("Search for %s finds:" % name)
+                for i in xrange(len(projects)):
+                    print("[%d] %s : %s" % (i, projects[i][0], projects[i][1]))
         elif options.remove:
             if options.by_name:
                 projects = []
@@ -283,7 +320,7 @@ def _dispatch():
             for project in args:
                 if options.by_name:
                     for name in args:
-                        projects = guess_project_name(name)
+                        projects = search(name, strict=False, local_only=False)
                         for i in xrange(len(projects)):
                             print("[%d] %s : %s" % (i, projects[i][0], projects[i][1]))
                         choice = False
