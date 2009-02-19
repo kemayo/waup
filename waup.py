@@ -44,26 +44,29 @@ class BadSearchException(Exception):
     pass
 
 def search(name, strict=False, local_only=False):
-    possible = []
-    # If we're doing a strict match and it's already cached, return that right away.
-    if strict:
-        if name in CACHE['name_project_map']:
-            possible.append((name, CACHE['name_project_map'][name]))
+    try:
+        possible = []
+        # If we're doing a strict match and it's already cached, return that right away.
+        if strict:
+            if name in CACHE['name_project_map']:
+                possible.append((name, CACHE['name_project_map'][name]))
+            if not local_only:
+                remote = guess_project_name(name)
+                possible.extend([proj for proj in remote if proj[0] == name])
+            return _unique(possible)
+        
+        # Otherwise, start to build things up...
+        search_re = re.compile(name, re.I)
+        for addon,project in CACHE['name_project_map'].items():
+            if search_re.search(addon):
+                possible.append((addon, project))
+
         if not local_only:
-            remote = guess_project_name(name)
-            possible.extend([proj for proj in remote if proj[0] == name])
+            possible.extend(guess_project_name(name))
+
         return _unique(possible)
-    
-    # Otherwise, start to build things up...
-    search_re = re.compile(name, re.I)
-    for addon,project in CACHE['name_project_map'].items():
-        if search_re.search(addon):
-            possible.append((addon, project))
-
-    if not local_only:
-        possible.extend(guess_project_name(name))
-
-    return _unique(possible)
+    except BadSearchException:
+        return []
 
 def guess_project_name(text):
     """Know the addon name and not the project name?
@@ -90,7 +93,12 @@ def guess_project_name(text):
             return [(title, match.group(1))]
         raise BadSearchException, "Redirected from the results page, but couldn't find the project name. (%s)" % text
 
-    listing = soup.findAll('table', 'listing')[1].find('tbody') # table.listing
+    # so, it's a search page
+    # were there results?
+    listing = soup.findAll('table', 'listing')
+    if len(listing) < 2:
+        raise BadSearchException, "A no-results search."
+    listing = listing[1].find('tbody') # table.listing
     
     possibilities = []
     for td in listing.findAll('td', 'first'):
