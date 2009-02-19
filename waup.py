@@ -144,11 +144,14 @@ def install_addon(name, force = False, clean = False):
         print("Skipping %s; latest version already installed." % name)
         return True
     zip = zipfile.ZipFile(_fetch(project['file_url']))
-    project['install_dir'] = re.search(r'^([^/]+)/', zip.filelist[0].filename).group(1)
     
-    install_to = os.path.join(WOW_DIRECTORY, project['install_dir'])
-    if clean and os.path.exists(install_to):
-        _removedir(install_to)
+    project['install_dir'] = _top_level_directories(zip)
+    
+    if clean:
+        for d in project['install_dir']:
+            install_to = os.path.join(WOW_DIRECTORY, project['install_dir'])
+            if os.path.exists(install_to):
+                _removedir(install_to)
 
     _unzip(zip, WOW_DIRECTORY)
     zip.close()
@@ -156,16 +159,18 @@ def install_addon(name, force = False, clean = False):
     print("%s now installed at %s" % (name, project['guid']))
 
     CACHE['addons'][name] = project
+    return True
 
 def uninstall_addon(name):
     project = CACHE['addons'].get(name)
     if not project:
         print("Couldn't uninstall %s; not installed.")
-        return
-    if os.path.exists(os.path.join(WOW_DIRECTORY, project['install_dir'])):
-        _removedir(os.path.join(WOW_DIRECTORY, project['install_dir']))
-    else:
-        print("Couldn't delete install directory; %s not found." % project['install_dir'])
+        return False
+    for path in project['install_dir']:
+        if os.path.exists(os.path.join(WOW_DIRECTORY, path)):
+            _removedir(os.path.join(WOW_DIRECTORY, path))
+        else:
+            print("Couldn't delete install directory; %s not found." % path)
     
     print("%s uninstalled" % name)
 
@@ -186,8 +191,13 @@ def load_cache():
             pickled_versions.close()
             # We managed to load the list of addons.  Now, let's check to see whether any have been uninstalled...
             for project, info in cache.get('addons').items():
-                if not (info.get('install_dir') and os.path.isdir(os.path.join(WOW_DIRECTORY, info['install_dir']))):
-                    # Addon directory is gone. Mark as uninstalled.
+                if type(info['install_dir']) != set:
+                    info['install_dir'] = set([info['install_dir']])
+                for d in info['install_dir']:
+                    if not (os.path.isdir(os.path.join(WOW_DIRECTORY, d))):
+                        info['install_dir'].remove(d)
+                if not info['install_dir']:
+                    # Addon directory is gone. Mark as uninstalled. (An empty set == False)
                     del(cache['addons'][project])
                     print("Couldn't find %s, removing from list of installed projects." % project)
         except EOFError:
@@ -244,6 +254,10 @@ def _permissions_from_external_attr(l):
     #return str((p[0]+p[1]*2+p[2]*4))+str((p[3]+p[4]*2+p[5]*4))+str((p[6]+p[7]*2+p[8]*4))
     # This produces an integer, suitable for passing to os.chmod (i.e., for 0755: 493)
     return int(''.join([str(i) for i in p]), 2)
+
+def _top_level_directories(zip):
+    dirs = set(f.filename.split('/')[0] for f in zip.filelist)
+    return dirs
 
 def _fetch(url):
     """A generic URL-fetcher, which handles gzipped content, returns a file-like object"""
