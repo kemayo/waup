@@ -178,6 +178,7 @@ def blank_cache():
     }
 
 def load_cache():
+    global CACHE
     if os.path.exists(os.path.join(WOW_DIRECTORY, 'waup_cache.pkl')):
         try:
             pickled_versions = open(os.path.join(WOW_DIRECTORY, 'waup_cache.pkl'), 'rb')
@@ -193,16 +194,19 @@ def load_cache():
             cache = blank_cache()
     else:
         cache = blank_cache()
+    CACHE = cache
     return cache
 
-def save_cache(cache):
+def save_cache():
+    if not CACHE:
+        return
     # rebuild this map on-save:
-    for project, info in cache['addons'].items():
+    for project, info in CACHE['addons'].items():
         if info.get('name'):
-            cache['name_project_map'][info.get('name')] = project
+            CACHE['name_project_map'][info.get('name')] = project
     # and save:
     pickled_versions = open(os.path.join(WOW_DIRECTORY, 'waup_cache.pkl'), 'wb')
-    cPickle.dump(cache, pickled_versions)
+    cPickle.dump(CACHE, pickled_versions)
     pickled_versions.close()
 
 # A few utility functions:
@@ -357,9 +361,9 @@ def _dispatch():
             install_addon(project, options.force, options.clean)
 
 if __name__ == "__main__":
-    CACHE = load_cache()
+    load_cache()
     
     _dispatch()
     
-    save_cache(CACHE)
+    save_cache()
 
